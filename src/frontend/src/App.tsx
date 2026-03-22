@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const COLS = 40;
-const ROWS = 30;
-const CELL = 16;
+const COLS = 26;
+const ROWS = 20;
+const CELL = 24;
 const CANVAS_W = COLS * CELL;
 const CANVAS_H = ROWS * CELL;
-const START_SPEED = 160;
-const MIN_SPEED = 50;
-const SPEED_STEP = 4;
+const MIN_SPEED = 100;
+const SPEED_STEP = 2;
+const FOOD_DENSITY = 0.25;
+
+// Speed per level start: Level 1 = 380ms (very slow), each level ~22ms faster
+function levelStartSpeed(level: number): number {
+  return Math.max(MIN_SPEED, 380 - (level - 1) * 22);
+}
 
 type Dir = { x: number; y: number };
 type Point = { x: number; y: number };
@@ -18,8 +23,20 @@ type GameState = "START" | "PLAYING" | "LEVELUP" | "GAMEOVER";
 function buildWalls(level: number): Set<string> {
   const walls = new Set<string>();
   const add = (x: number, y: number) => walls.add(`${x},${y}`);
+  const hLine = (x1: number, x2: number, y: number) => {
+    for (let x = x1; x <= x2; x++) add(x, y);
+  };
+  const vLine = (y1: number, y2: number, x: number) => {
+    for (let y = y1; y <= y2; y++) add(x, y);
+  };
+  const box = (x1: number, y1: number, x2: number, y2: number) => {
+    hLine(x1, x2, y1);
+    hLine(x1, x2, y2);
+    vLine(y1, y2, x1);
+    vLine(y1, y2, x2);
+  };
 
-  // Always: border
+  // Always: border walls
   for (let x = 0; x < COLS; x++) {
     add(x, 0);
     add(x, ROWS - 1);
@@ -30,198 +47,83 @@ function buildWalls(level: number): Set<string> {
   }
 
   if (level === 1) {
-    // Sparse maze – open corridors
-    for (let x = 5; x <= 10; x++) add(x, 6);
-    for (let x = 29; x <= 34; x++) add(x, 6);
-    for (let x = 5; x <= 10; x++) add(x, 23);
-    for (let x = 29; x <= 34; x++) add(x, 23);
-    for (let y = 6; y <= 11; y++) add(5, y);
-    for (let y = 6; y <= 11; y++) add(34, y);
-    for (let y = 18; y <= 23; y++) add(5, y);
-    for (let y = 18; y <= 23; y++) add(34, y);
-    for (let x = 16; x <= 23; x++) add(x, 10);
-    for (let x = 16; x <= 23; x++) add(x, 19);
-    for (let y = 10; y <= 14; y++) add(16, y);
-    for (let y = 10; y <= 14; y++) add(23, y);
-    for (let y = 15; y <= 19; y++) add(16, y);
-    for (let y = 15; y <= 19; y++) add(23, y);
+    // Very few obstacles
+    hLine(6, 9, 5);
+    hLine(16, 19, 5);
   } else if (level === 2) {
-    // More walls, cross pattern
-    for (let x = 4; x <= 14; x++) add(x, 5);
-    for (let x = 25; x <= 35; x++) add(x, 5);
-    for (let x = 4; x <= 14; x++) add(x, 24);
-    for (let x = 25; x <= 35; x++) add(x, 24);
-    for (let y = 5; y <= 12; y++) add(4, y);
-    for (let y = 5; y <= 12; y++) add(14, y);
-    for (let y = 5; y <= 12; y++) add(25, y);
-    for (let y = 5; y <= 12; y++) add(35, y);
-    for (let y = 17; y <= 24; y++) add(4, y);
-    for (let y = 17; y <= 24; y++) add(14, y);
-    for (let y = 17; y <= 24; y++) add(25, y);
-    for (let y = 17; y <= 24; y++) add(35, y);
-    for (let x = 17; x <= 22; x++) add(x, 14);
-    for (let x = 17; x <= 22; x++) add(x, 15);
-    for (let y = 8; y <= 11; y++) add(19, y);
-    for (let y = 8; y <= 11; y++) add(20, y);
-    for (let y = 18; y <= 21; y++) add(19, y);
-    for (let y = 18; y <= 21; y++) add(20, y);
-    for (let x = 8; x <= 11; x++) add(x, 14);
-    for (let x = 8; x <= 11; x++) add(x, 15);
-    for (let x = 28; x <= 31; x++) add(x, 14);
-    for (let x = 28; x <= 31; x++) add(x, 15);
+    hLine(6, 9, 5);
+    hLine(16, 19, 5);
+    hLine(6, 9, 14);
+    hLine(16, 19, 14);
   } else if (level === 3) {
-    // Dense labyrinth with long corridors
-    for (let x = 2; x <= 18; x++) add(x, 4);
-    for (let x = 21; x <= 37; x++) add(x, 4);
-    for (let x = 2; x <= 18; x++) add(x, 25);
-    for (let x = 21; x <= 37; x++) add(x, 25);
-    for (let y = 4; y <= 25; y++) add(2, y);
-    for (let y = 4; y <= 25; y++) add(37, y);
-    for (let y = 7; y <= 14; y++) add(6, y);
-    for (let y = 7; y <= 14; y++) add(12, y);
-    for (let y = 15; y <= 22; y++) add(6, y);
-    for (let y = 15; y <= 22; y++) add(12, y);
-    for (let y = 7; y <= 14; y++) add(27, y);
-    for (let y = 7; y <= 14; y++) add(33, y);
-    for (let y = 15; y <= 22; y++) add(27, y);
-    for (let y = 15; y <= 22; y++) add(33, y);
-    for (let x = 6; x <= 12; x++) add(x, 7);
-    for (let x = 6; x <= 12; x++) add(x, 14);
-    for (let x = 6; x <= 12; x++) add(x, 22);
-    for (let x = 27; x <= 33; x++) add(x, 7);
-    for (let x = 27; x <= 33; x++) add(x, 14);
-    for (let x = 27; x <= 33; x++) add(x, 22);
-    for (let x = 15; x <= 24; x++) add(x, 9);
-    for (let x = 15; x <= 24; x++) add(x, 20);
-    for (let y = 9; y <= 20; y++) add(15, y);
-    for (let y = 9; y <= 20; y++) add(24, y);
+    hLine(6, 9, 5);
+    hLine(16, 19, 5);
+    hLine(6, 9, 14);
+    hLine(16, 19, 14);
+    vLine(7, 10, 12);
+    vLine(9, 12, 13);
+  } else if (level === 4) {
+    box(4, 3, 7, 6);
+    box(18, 3, 21, 6);
+    box(4, 13, 7, 16);
+    box(18, 13, 21, 16);
+    hLine(11, 14, 9);
+  } else if (level === 5) {
+    box(4, 3, 7, 6);
+    box(18, 3, 21, 6);
+    box(4, 13, 7, 16);
+    box(18, 13, 21, 16);
+    hLine(11, 14, 9);
+    vLine(5, 7, 12);
+    vLine(12, 14, 12);
+  } else if (level === 6) {
+    hLine(3, 7, 4);
+    hLine(19, 22, 4);
+    hLine(3, 7, 15);
+    hLine(19, 22, 15);
+    vLine(7, 12, 8);
+    vLine(7, 12, 17);
+    hLine(11, 14, 9);
+    hLine(11, 14, 10);
+    vLine(4, 7, 13);
+    vLine(12, 15, 13);
   } else {
-    // Level 4+: very dense maze
-    const lv = (level - 4) % 3;
-    // Outer frame
-    for (let x = 3; x <= 36; x++) {
-      add(x, 3);
-      add(x, 26);
-    }
-    for (let y = 3; y <= 26; y++) {
-      add(3, y);
-      add(36, y);
-    }
+    const lv = (level - 7) % 3;
     if (lv === 0) {
-      // Grid-like
-      for (let x = 7; x <= 32; x += 5) {
-        for (let y = 6; y <= 23; y++) add(x, y);
-      }
-      for (let y = 8; y <= 21; y += 5) {
-        for (let x = 5; x <= 34; x++) add(x, y);
-      }
-      // Open some passages
-      for (let x = 7; x <= 32; x += 5) {
-        add(x, 12); // gap
-        walls.delete(`${x},12`);
-        walls.delete(`${x},13`);
-        walls.delete(`${x},17`);
-        walls.delete(`${x},18`);
-      }
-      for (let y = 8; y <= 21; y += 5) {
-        walls.delete(`${17},${y}`);
-        walls.delete(`${18},${y}`);
-        walls.delete(`${22},${y}`);
-        walls.delete(`${23},${y}`);
-      }
+      hLine(3, 10, 5);
+      hLine(15, 22, 5);
+      hLine(3, 10, 14);
+      hLine(15, 22, 14);
+      vLine(7, 12, 5);
+      hLine(10, 15, 9);
+      hLine(10, 15, 10);
     } else if (lv === 1) {
-      // Spiral-ish
-      for (let x = 7; x <= 32; x++) add(x, 7);
-      for (let y = 7; y <= 22; y++) add(32, y);
-      for (let x = 7; x <= 32; x++) add(x, 22);
-      for (let y = 7; y <= 18; y++) add(7, y);
-      for (let x = 11; x <= 28; x++) add(x, 11);
-      for (let y = 11; y <= 22; y++) add(28, y);
-      for (let x = 11; x <= 28; x++) add(x, 18);
-      for (let y = 11; y <= 18; y++) add(11, y);
-      // Open entries
-      walls.delete("19,7");
-      walls.delete("20,7");
-      walls.delete("32,14");
-      walls.delete("32,15");
-      walls.delete("19,22");
-      walls.delete("20,22");
-      walls.delete("7,14");
-      walls.delete("7,15");
-      walls.delete("19,11");
-      walls.delete("20,11");
-      walls.delete("28,14");
-      walls.delete("28,15");
-      walls.delete("19,18");
-      walls.delete("20,18");
-      walls.delete("11,14");
-      walls.delete("11,15");
+      box(3, 3, 6, 6);
+      box(19, 3, 22, 6);
+      box(3, 13, 6, 16);
+      box(19, 13, 22, 16);
+      hLine(10, 15, 9);
+      vLine(7, 12, 12);
+      add(12, 5);
+      add(13, 5);
+      add(12, 14);
+      add(13, 14);
     } else {
-      // Rooms
-      for (let x = 5; x <= 18; x++) {
-        add(x, 6);
-        add(x, 13);
-      }
-      for (let x = 21; x <= 34; x++) {
-        add(x, 6);
-        add(x, 13);
-      }
-      for (let x = 5; x <= 18; x++) {
-        add(x, 16);
-        add(x, 23);
-      }
-      for (let x = 21; x <= 34; x++) {
-        add(x, 16);
-        add(x, 23);
-      }
-      for (let y = 6; y <= 13; y++) {
-        add(5, y);
-        add(18, y);
-      }
-      for (let y = 6; y <= 13; y++) {
-        add(21, y);
-        add(34, y);
-      }
-      for (let y = 16; y <= 23; y++) {
-        add(5, y);
-        add(18, y);
-      }
-      for (let y = 16; y <= 23; y++) {
-        add(21, y);
-        add(34, y);
-      }
-      // doors
-      walls.delete("11,6");
-      walls.delete("12,6");
-      walls.delete("27,6");
-      walls.delete("28,6");
-      walls.delete("11,13");
-      walls.delete("12,13");
-      walls.delete("27,13");
-      walls.delete("28,13");
-      walls.delete("11,16");
-      walls.delete("12,16");
-      walls.delete("27,16");
-      walls.delete("28,16");
-      walls.delete("11,23");
-      walls.delete("12,23");
-      walls.delete("27,23");
-      walls.delete("28,23");
-      walls.delete("18,9");
-      walls.delete("18,10");
-      walls.delete("21,9");
-      walls.delete("21,10");
-      walls.delete("18,19");
-      walls.delete("18,20");
-      walls.delete("21,19");
-      walls.delete("21,20");
+      vLine(3, 9, 7);
+      vLine(10, 16, 7);
+      vLine(3, 9, 18);
+      vLine(10, 16, 18);
+      hLine(9, 16, 4);
+      hLine(9, 16, 15);
+      hLine(5, 8, 10);
+      hLine(17, 20, 10);
     }
   }
 
   return walls;
 }
 
-// ─── Audio ────────────────────────────────────────────────────────────────────
+// ─── Lo-fi Audio Engine ───────────────────────────────────────────────────────
 class AudioEngine {
   ctx: AudioContext | null = null;
   musicIntervalId: ReturnType<typeof setInterval> | null = null;
@@ -232,26 +134,30 @@ class AudioEngine {
     if (!this.ctx) {
       this.ctx = new AudioContext();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.18;
+      this.masterGain.gain.value = 0.22;
       this.masterGain.connect(this.ctx.destination);
     }
     return this.ctx;
   }
 
-  private playNote(
+  private playTone(
     freq: number,
     type: OscillatorType,
     startTime: number,
     duration: number,
-    gain = 0.3,
+    gainPeak: number,
+    attack = 0.04,
+    release = 0.3,
   ) {
     const ctx = this.getCtx();
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
     osc.type = type;
     osc.frequency.value = freq;
-    g.gain.setValueAtTime(gain, startTime);
-    g.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+    g.gain.setValueAtTime(0.0001, startTime);
+    g.gain.linearRampToValueAtTime(gainPeak, startTime + attack);
+    g.gain.setValueAtTime(gainPeak, startTime + duration - release);
+    g.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
     osc.connect(g);
     g.connect(this.masterGain!);
     osc.start(startTime);
@@ -262,31 +168,96 @@ class AudioEngine {
     const ctx = this.getCtx();
     if (ctx.state === "suspended") ctx.resume();
     this.step = 0;
-    const bassNotes = [55, 55, 69, 69, 82, 82, 69, 55];
-    const melodyNotes = [
-      220, 277, 330, 415, 330, 277, 220, 165, 196, 247, 330, 392, 330, 247, 196,
-      165,
+
+    // Lo-fi @ ~72 BPM: eighth note = 417ms
+    // Chord cycle (16 steps = 1 bar): Fmaj7 -> Em7 -> Am7 -> Dm7
+    // Bass root notes (octave 2): F2=87, E2=82, A2=110, D2=73
+    const bassNotes = [
+      87, 0, 87, 0, 82, 0, 82, 0, 110, 0, 110, 0, 73, 0, 73, 0,
     ];
+    // Chord pads (played at chord change, held)
+    const chordFreqs = [
+      [349, 440, 523, 659], // Fmaj7
+      [330, 392, 494, 587], // Em7
+      [220, 262, 330, 392], // Am7
+      [294, 349, 440, 523], // Dm7
+    ];
+    // Sparse melody over the progression
+    const melodyNotes = [
+      523, 0, 494, 440, 0, 392, 440, 0, 392, 330, 0, 294, 330, 0, 262, 0,
+    ];
+
+    const EIGHTH = 417; // ms per eighth note
+
     this.musicIntervalId = setInterval(() => {
+      const s = this.step % 16;
       const t = ctx.currentTime;
-      const bNote = bassNotes[this.step % bassNotes.length];
-      const mNote = melodyNotes[this.step % melodyNotes.length];
-      this.playNote(bNote, "sawtooth", t, 0.18, 0.5);
-      this.playNote(mNote, "square", t, 0.14, 0.25);
-      if (this.step % 2 === 0) {
-        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.03, ctx.sampleRate);
+
+      // Bass — soft triangle, on beats 1 & 3 (steps 0, 4, 8, 12)
+      if (bassNotes[s] > 0) {
+        this.playTone(bassNotes[s], "triangle", t, 0.75, 0.38, 0.02, 0.4);
+      }
+
+      // Chord pad — only at chord change (every 4 steps)
+      if (s % 4 === 0) {
+        const chord = chordFreqs[s / 4];
+        const holdDur = (EIGHTH / 1000) * 3.6;
+        for (const freq of chord) {
+          this.playTone(freq, "sine", t, holdDur, 0.07, 0.12, 0.5);
+        }
+      }
+
+      // Melody — sparse sine notes
+      if (melodyNotes[s] > 0) {
+        this.playTone(melodyNotes[s], "sine", t, 0.5, 0.18, 0.04, 0.3);
+      }
+
+      // Soft hi-hat on steps 4 and 12 (beats 2 & 4)
+      if (s === 4 || s === 12) {
+        const buf = ctx.createBuffer(
+          1,
+          Math.floor(ctx.sampleRate * 0.05),
+          ctx.sampleRate,
+        );
         const data = buf.getChannelData(0);
-        for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        for (let i = 0; i < data.length; i++) {
+          data[i] =
+            (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.012));
+        }
         const src = ctx.createBufferSource();
+        const hpf = ctx.createBiquadFilter();
+        hpf.type = "highpass";
+        hpf.frequency.value = 7000;
         const g = ctx.createGain();
+        g.gain.value = 0.06;
         src.buffer = buf;
-        g.gain.value = 0.08;
-        src.connect(g);
+        src.connect(hpf);
+        hpf.connect(g);
         g.connect(this.masterGain!);
         src.start(t);
       }
+
+      // Very quiet vinyl crackle every few steps
+      if (s % 3 === 0) {
+        const len = Math.floor(ctx.sampleRate * 0.015);
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource();
+        const lpf = ctx.createBiquadFilter();
+        lpf.type = "lowpass";
+        lpf.frequency.value = 2000;
+        const g = ctx.createGain();
+        g.gain.value = 0.018;
+        src.buffer = buf;
+        src.connect(lpf);
+        lpf.connect(g);
+        g.connect(this.masterGain!);
+        src.start(t);
+      }
+
       this.step++;
-    }, 130);
+    }, EIGHTH);
   }
 
   stopMusic() {
@@ -299,26 +270,26 @@ class AudioEngine {
   playEat() {
     const ctx = this.getCtx();
     const t = ctx.currentTime;
-    this.playNote(880, "sine", t, 0.05, 0.4);
-    this.playNote(1200, "sine", t + 0.06, 0.05, 0.35);
+    this.playTone(880, "sine", t, 0.08, 0.3, 0.01, 0.06);
+    this.playTone(1200, "sine", t + 0.07, 0.07, 0.22, 0.01, 0.05);
   }
 
   playLevelUp() {
     const ctx = this.getCtx();
     const t = ctx.currentTime;
-    this.playNote(523, "square", t, 0.1, 0.4);
-    this.playNote(659, "square", t + 0.12, 0.1, 0.4);
-    this.playNote(784, "square", t + 0.24, 0.1, 0.4);
-    this.playNote(1047, "square", t + 0.36, 0.2, 0.5);
+    this.playTone(523, "triangle", t, 0.12, 0.4);
+    this.playTone(659, "triangle", t + 0.14, 0.12, 0.4);
+    this.playTone(784, "triangle", t + 0.28, 0.12, 0.4);
+    this.playTone(1047, "triangle", t + 0.42, 0.22, 0.5);
   }
 
   playGameOver() {
     const ctx = this.getCtx();
     const t = ctx.currentTime;
-    this.playNote(440, "sawtooth", t, 0.25, 0.5);
-    this.playNote(330, "sawtooth", t + 0.3, 0.25, 0.5);
-    this.playNote(220, "sawtooth", t + 0.6, 0.4, 0.5);
-    this.playNote(110, "sawtooth", t + 1.05, 0.5, 0.5);
+    this.playTone(440, "triangle", t, 0.28, 0.4);
+    this.playTone(330, "triangle", t + 0.32, 0.28, 0.4);
+    this.playTone(220, "triangle", t + 0.65, 0.38, 0.4);
+    this.playTone(110, "triangle", t + 1.08, 0.5, 0.4);
   }
 }
 
@@ -382,8 +353,8 @@ function drawSnake(ctx: CanvasRenderingContext2D, snake: Point[]) {
     if (i === 0) {
       ctx.shadowBlur = 0;
       ctx.fillStyle = "#000";
-      ctx.fillRect(px + 4, py + 4, 3, 3);
-      ctx.fillRect(px + 9, py + 4, 3, 3);
+      ctx.fillRect(px + 5, py + 5, 4, 4);
+      ctx.fillRect(px + 15, py + 5, 4, 4);
     }
     ctx.shadowBlur = 0;
   }
@@ -395,9 +366,7 @@ function drawFoods(
   tick: number,
 ) {
   const hue1 = (tick * 2) % 360;
-  const hue2 = (tick * 2 + 180) % 360;
-  // Draw in two passes: outer glow, then inner dot
-  ctx.shadowBlur = 8;
+  ctx.shadowBlur = 10;
   for (let i = 0; i < foods.length; i++) {
     const f = foods[i];
     const hue = (hue1 + i * 13) % 360;
@@ -405,24 +374,22 @@ function drawFoods(
     ctx.shadowColor = color;
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(f.x * CELL + CELL / 2, f.y * CELL + CELL / 2, 3.5, 0, Math.PI * 2);
+    ctx.arc(f.x * CELL + CELL / 2, f.y * CELL + CELL / 2, 5, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.shadowBlur = 0;
-  // White highlight on every ball
   ctx.fillStyle = "rgba(255,255,255,0.7)";
   for (const f of foods) {
     ctx.beginPath();
     ctx.arc(
-      f.x * CELL + CELL / 2 - 1,
-      f.y * CELL + CELL / 2 - 1,
-      1.2,
+      f.x * CELL + CELL / 2 - 1.5,
+      f.y * CELL + CELL / 2 - 1.5,
+      1.8,
       0,
       Math.PI * 2,
     );
     ctx.fill();
   }
-  void hue2;
 }
 
 function drawHUD(
@@ -432,7 +399,7 @@ function drawHUD(
   remaining: number,
   total: number,
 ) {
-  ctx.font = "8px 'Press Start 2P'";
+  ctx.font = "10px 'Press Start 2P'";
   ctx.textBaseline = "top";
   ctx.shadowBlur = 12;
   ctx.shadowColor = "#FFD84A";
@@ -441,48 +408,52 @@ function drawHUD(
   ctx.shadowColor = "#39E6FF";
   ctx.fillStyle = "#39E6FF";
   const lvText = `LV:${level}`;
-  const tw = ctx.measureText(lvText).width;
-  ctx.fillText(lvText, CANVAS_W - tw - 8, 6);
-  // Balls remaining bar
+  ctx.fillText(lvText, CANVAS_W - ctx.measureText(lvText).width - 8, 6);
   ctx.shadowColor = "#FF43C6";
   ctx.fillStyle = "#FF43C6";
   const rem = `BALLS:${remaining}/${total}`;
-  const rw = ctx.measureText(rem).width;
-  ctx.fillText(rem, CANVAS_W / 2 - rw / 2, 6);
+  ctx.fillText(rem, CANVAS_W / 2 - ctx.measureText(rem).width / 2, 6);
   ctx.shadowBlur = 0;
 }
 
 function drawStartScreen(ctx: CanvasRenderingContext2D, tick: number) {
-  ctx.font = "bold 28px 'Press Start 2P'";
+  ctx.font = "bold 26px 'Press Start 2P'";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.shadowBlur = 30;
   ctx.shadowColor = "#39E6FF";
   ctx.fillStyle = "#39E6FF";
-  ctx.fillText("NIBBLY '92", CANVAS_W / 2, 110);
+  ctx.fillText("NIBBLY '92", CANVAS_W / 2, CANVAS_H * 0.28);
   ctx.shadowColor = "#FF43C6";
   ctx.fillStyle = "rgba(255,67,198,0.5)";
-  ctx.fillText("NIBBLY '92", CANVAS_W / 2 + 2, 112);
+  ctx.fillText("NIBBLY '92", CANVAS_W / 2 + 2, CANVAS_H * 0.28 + 2);
   ctx.shadowBlur = 0;
   ctx.font = "7px 'Press Start 2P'";
   ctx.shadowBlur = 8;
   ctx.shadowColor = "#8B4DFF";
   ctx.fillStyle = "#8B4DFF";
-  ctx.fillText("COLLECT ALL BALLS - NEXT LEVEL!", CANVAS_W / 2, 152);
-  ctx.fillText("WALLS BOUNCE - SELF = GAME OVER", CANVAS_W / 2, 168);
+  ctx.fillText(
+    "COLLECT ALL BALLS - NEXT LEVEL!",
+    CANVAS_W / 2,
+    CANVAS_H * 0.46,
+  );
+  ctx.fillText(
+    "WALLS BOUNCE - SELF = GAME OVER",
+    CANVAS_W / 2,
+    CANVAS_H * 0.54,
+  );
   ctx.shadowBlur = 0;
-  const blink = Math.sin(tick * 0.08) > 0;
-  if (blink) {
+  if (Math.sin(tick * 0.08) > 0) {
     ctx.font = "8px 'Press Start 2P'";
     ctx.shadowBlur = 12;
     ctx.shadowColor = "#49FF8A";
     ctx.fillStyle = "#49FF8A";
-    ctx.fillText("PRESS ANY KEY TO START", CANVAS_W / 2, 220);
+    ctx.fillText("PRESS ANY KEY TO START", CANVAS_W / 2, CANVAS_H * 0.68);
     ctx.shadowBlur = 0;
   }
   ctx.font = "6px 'Press Start 2P'";
   ctx.fillStyle = "rgba(57,230,255,0.6)";
-  ctx.fillText("ARROWS / WASD TO MOVE", CANVAS_W / 2, 260);
+  ctx.fillText("ARROWS / WASD TO MOVE", CANVAS_W / 2, CANVAS_H * 0.8);
   ctx.textAlign = "left";
 }
 
@@ -504,8 +475,7 @@ function drawLevelUpScreen(
   ctx.shadowColor = "#FFD84A";
   ctx.fillStyle = "#FFD84A";
   ctx.fillText(`LEVEL ${level} STARTING...`, CANVAS_W / 2, CANVAS_H / 2 + 10);
-  const blink = Math.sin(tick * 0.15) > 0;
-  if (blink) {
+  if (Math.sin(tick * 0.15) > 0) {
     ctx.font = "7px 'Press Start 2P'";
     ctx.shadowColor = "#39E6FF";
     ctx.fillStyle = "#39E6FF";
@@ -539,8 +509,7 @@ function drawGameOverScreen(
     CANVAS_H / 2 - 10,
   );
   ctx.fillText(`LEVEL REACHED: ${level}`, CANVAS_W / 2, CANVAS_H / 2 + 16);
-  const blink = Math.sin(tick * 0.08) > 0;
-  if (blink) {
+  if (Math.sin(tick * 0.08) > 0) {
     ctx.font = "7px 'Press Start 2P'";
     ctx.shadowColor = "#49FF8A";
     ctx.fillStyle = "#49FF8A";
@@ -612,7 +581,7 @@ export default function App() {
   const foodsRef = useRef<Point[]>([]);
   const totalFoodsRef = useRef(0);
   const scoreRef = useRef(0);
-  const speedRef = useRef(START_SPEED);
+  const speedRef = useRef(levelStartSpeed(1));
   const tickRef = useRef(0);
   const levelRef = useRef(1);
   const rafRef = useRef<number>(0);
@@ -646,7 +615,11 @@ export default function App() {
     for (let x = 1; x < COLS - 1; x++) {
       for (let y = 1; y < ROWS - 1; y++) {
         const key = `${x},${y}`;
-        if (!wallsRef.current.has(key) && !snakeSet.has(key)) {
+        if (
+          !wallsRef.current.has(key) &&
+          !snakeSet.has(key) &&
+          (x * 3 + y * 7) % Math.round(1 / FOOD_DENSITY) === 0
+        ) {
           foods.push({ x, y });
         }
       }
@@ -658,19 +631,19 @@ export default function App() {
   const initLevel = useCallback(
     (level: number, keepSnake: boolean) => {
       rebuildWalls(level);
+      // Reset speed to this level's starting speed
+      speedRef.current = levelStartSpeed(level);
       if (!keepSnake) {
         snakeRef.current = [
-          { x: 22, y: 15 },
-          { x: 21, y: 15 },
-          { x: 20, y: 15 },
+          { x: 13, y: 10 },
+          { x: 12, y: 10 },
+          { x: 11, y: 10 },
         ];
         dirRef.current = { x: 1, y: 0 };
         nextDirRef.current = { x: 1, y: 0 };
       } else {
-        // Place snake in safe spot if needed
         dirRef.current = { x: 1, y: 0 };
         nextDirRef.current = { x: 1, y: 0 };
-        // Find a safe start position
         let placed = false;
         outer: for (let x = 5; x < COLS - 5; x++) {
           for (let y = 5; y < ROWS - 5; y++) {
@@ -691,9 +664,9 @@ export default function App() {
         }
         if (!placed) {
           snakeRef.current = [
-            { x: 22, y: 15 },
-            { x: 21, y: 15 },
-            { x: 20, y: 15 },
+            { x: 13, y: 10 },
+            { x: 12, y: 10 },
+            { x: 11, y: 10 },
           ];
         }
       }
@@ -705,7 +678,7 @@ export default function App() {
   const initGame = useCallback(() => {
     levelRef.current = 1;
     scoreRef.current = 0;
-    speedRef.current = START_SPEED;
+    speedRef.current = levelStartSpeed(1);
     initLevel(1, false);
   }, [initLevel]);
 
@@ -717,12 +690,9 @@ export default function App() {
     dirRef.current = nextDirRef.current;
     const head = snake[0];
     let dir = dirRef.current;
-
     let newHead: Point = { x: head.x + dir.x, y: head.y + dir.y };
 
-    // Wall bounce: if next cell is a wall, try to turn
     if (walls.has(`${newHead.x},${newHead.y}`)) {
-      // Try perpendicular directions (left turn, right turn relative to current dir)
       const perpLeft: Dir = { x: dir.y, y: -dir.x };
       const perpRight: Dir = { x: -dir.y, y: dir.x };
       if (!walls.has(`${head.x + perpLeft.x},${head.y + perpLeft.y}`)) {
@@ -738,13 +708,11 @@ export default function App() {
         dirRef.current = dir;
         newHead = { x: head.x + dir.x, y: head.y + dir.y };
       } else {
-        // Completely stuck — just don't move this tick
         timeoutRef.current = setTimeout(gameTick, speedRef.current);
         return;
       }
     }
 
-    // Self-collision = game over
     const hitSelf = snake.some((s) => s.x === newHead.x && s.y === newHead.y);
     if (hitSelf) {
       stateRef.current = "GAMEOVER";
@@ -753,7 +721,6 @@ export default function App() {
       return;
     }
 
-    // Check food
     const foodIdx = foodsRef.current.findIndex(
       (f) => f.x === newHead.x && f.y === newHead.y,
     );
@@ -772,7 +739,6 @@ export default function App() {
     }
     snakeRef.current = newSnake;
 
-    // Check level complete
     if (foodsRef.current.length === 0) {
       stateRef.current = "LEVELUP";
       levelRef.current += 1;
@@ -804,7 +770,6 @@ export default function App() {
         startGameLoop();
         return;
       }
-
       const cur = dirRef.current;
       if (dir === "UP" && cur.y !== 1) nextDirRef.current = { x: 0, y: -1 };
       else if (dir === "DOWN" && cur.y !== -1)
@@ -908,14 +873,13 @@ export default function App() {
   useEffect(() => {
     if ("ontouchstart" in window || navigator.maxTouchPoints > 0)
       setIsTouchDevice(true);
-
     rebuildWalls(1);
     demoSnakeRef.current = [
-      { x: 20, y: 15 },
-      { x: 19, y: 15 },
-      { x: 18, y: 15 },
-      { x: 17, y: 15 },
-      { x: 16, y: 15 },
+      { x: 13, y: 10 },
+      { x: 12, y: 10 },
+      { x: 11, y: 10 },
+      { x: 10, y: 10 },
+      { x: 9, y: 10 },
     ];
     demoDirRef.current = { x: 1, y: 0 };
     rafRef.current = requestAnimationFrame(renderLoop);
