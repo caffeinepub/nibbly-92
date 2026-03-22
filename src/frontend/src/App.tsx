@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const COLS = 40;
@@ -334,9 +334,60 @@ function drawGameOverScreen(
   ctx.textAlign = "left";
 }
 
+// ─── D-Pad Button ──────────────────────────────────────────────────────────────
+interface DPadButtonProps {
+  label: string;
+  ocid: string;
+  onPress: () => void;
+  style?: React.CSSProperties;
+}
+
+function DPadButton({ label, ocid, onPress, style }: DPadButtonProps) {
+  return (
+    <button
+      type="button"
+      data-ocid={ocid}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        onPress();
+      }}
+      style={{
+        width: 56,
+        height: 56,
+        background: "rgba(0,0,0,0.7)",
+        border: "2px solid #39E6FF",
+        borderRadius: 8,
+        color: "#39E6FF",
+        fontSize: 22,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        boxShadow: "0 0 10px #39E6FF, 0 0 20px rgba(57,230,255,0.3)",
+        touchAction: "none",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        transition: "background 0.1s, box-shadow 0.1s",
+        ...style,
+      }}
+      onPointerEnter={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background =
+          "rgba(57,230,255,0.18)";
+      }}
+      onPointerLeave={(e) => {
+        (e.currentTarget as HTMLButtonElement).style.background =
+          "rgba(0,0,0,0.7)";
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
 
   const stateRef = useRef<GameState>("START");
   const snakeRef = useRef<Point[]>([]);
@@ -347,11 +398,12 @@ export default function App() {
   const speedRef = useRef(START_SPEED);
   const tickRef = useRef(0);
   const rafRef = useRef<number>(0);
-  // Use setTimeout for variable-speed game loop
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const demoSnakeRef = useRef<Point[]>([]);
   const demoDirRef = useRef<Dir>({ x: 1, y: 0 });
   const demoTickRef = useRef(0);
+  // Touch swipe tracking
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const getCtx = useCallback(() => {
     return canvasRef.current?.getContext("2d") ?? null;
@@ -387,7 +439,6 @@ export default function App() {
     spawnFood();
   }, [spawnFood]);
 
-  // Recursive setTimeout for variable-speed ticks
   const gameTick = useCallback(() => {
     if (stateRef.current !== "PLAYING") return;
 
@@ -423,7 +474,6 @@ export default function App() {
     }
     snakeRef.current = newSnake;
 
-    // Schedule next tick at current (possibly updated) speed
     timeoutRef.current = setTimeout(gameTick, speedRef.current);
   }, [spawnFood]);
 
@@ -431,6 +481,29 @@ export default function App() {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(gameTick, speedRef.current);
   }, [gameTick]);
+
+  // ─── Shared direction handler (used by keyboard + touch + d-pad) ────────────
+  const handleDirection = useCallback(
+    (dir: "UP" | "DOWN" | "LEFT" | "RIGHT") => {
+      if (stateRef.current === "START" || stateRef.current === "GAMEOVER") {
+        stateRef.current = "PLAYING";
+        initGame();
+        startGameLoop();
+        audioEngine.startMusic();
+        return;
+      }
+
+      const cur = dirRef.current;
+      if (dir === "UP" && cur.y !== 1) nextDirRef.current = { x: 0, y: -1 };
+      else if (dir === "DOWN" && cur.y !== -1)
+        nextDirRef.current = { x: 0, y: 1 };
+      else if (dir === "LEFT" && cur.x !== 1)
+        nextDirRef.current = { x: -1, y: 0 };
+      else if (dir === "RIGHT" && cur.x !== -1)
+        nextDirRef.current = { x: 1, y: 0 };
+    },
+    [initGame, startGameLoop],
+  );
 
   const renderLoop = useCallback(() => {
     const ctx = getCtx();
@@ -497,6 +570,11 @@ export default function App() {
   }, [getCtx]);
 
   useEffect(() => {
+    // Detect touch device
+    if ("ontouchstart" in window || navigator.maxTouchPoints > 0) {
+      setIsTouchDevice(true);
+    }
+
     demoSnakeRef.current = [
       { x: 20, y: 15 },
       { x: 19, y: 15 },
@@ -511,15 +589,7 @@ export default function App() {
     const handleKey = (e: KeyboardEvent) => {
       const key = e.key;
 
-      if (stateRef.current === "START") {
-        stateRef.current = "PLAYING";
-        initGame();
-        startGameLoop();
-        audioEngine.startMusic();
-        return;
-      }
-
-      if (stateRef.current === "GAMEOVER") {
+      if (stateRef.current === "START" || stateRef.current === "GAMEOVER") {
         stateRef.current = "PLAYING";
         initGame();
         startGameLoop();
@@ -552,22 +622,72 @@ export default function App() {
       }
     };
 
+    // ─── Swipe detection on canvas ──────────────────────────────────────────
+    const canvas = canvasRef.current;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      const t = e.touches[0];
+      touchStartRef.current = { x: t.clientX, y: t.clientY };
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      if (!touchStartRef.current) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - touchStartRef.current.x;
+      const dy = t.clientY - touchStartRef.current.y;
+      touchStartRef.current = null;
+
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+      const threshold = 20;
+
+      if (absDx < threshold && absDy < threshold) {
+        // Tap — treat as start/restart
+        if (stateRef.current === "START" || stateRef.current === "GAMEOVER") {
+          stateRef.current = "PLAYING";
+          initGame();
+          startGameLoop();
+          audioEngine.startMusic();
+        }
+        return;
+      }
+
+      if (absDx > absDy) {
+        handleDirection(dx > 0 ? "RIGHT" : "LEFT");
+      } else {
+        handleDirection(dy > 0 ? "DOWN" : "UP");
+      }
+    };
+
+    if (canvas) {
+      canvas.addEventListener("touchstart", handleTouchStart, {
+        passive: false,
+      });
+      canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
+    }
+
     window.addEventListener("keydown", handleKey);
     canvasRef.current?.focus();
 
     return () => {
       window.removeEventListener("keydown", handleKey);
+      if (canvas) {
+        canvas.removeEventListener("touchstart", handleTouchStart);
+        canvas.removeEventListener("touchend", handleTouchEnd);
+      }
       cancelAnimationFrame(rafRef.current);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       audioEngine.stopMusic();
     };
-  }, [renderLoop, initGame, startGameLoop]);
+  }, [renderLoop, initGame, startGameLoop, handleDirection]);
 
   return (
     <div
       style={{
         width: "100vw",
-        height: "100vh",
+        minHeight: "100vh",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -575,6 +695,7 @@ export default function App() {
         background:
           "linear-gradient(135deg, #070812 0%, #0B0C18 50%, #07080F 100%)",
         fontFamily: "'Press Start 2P', monospace",
+        paddingBottom: isTouchDevice ? 24 : 0,
       }}
     >
       <div
@@ -603,12 +724,65 @@ export default function App() {
           boxShadow:
             "0 0 10px #39E6FF, 0 0 30px #39E6FF, 0 0 60px #8B4DFF, 0 0 2px #FF43C6 inset",
           border: "2px solid #39E6FF",
+          maxWidth: "100vw",
+          touchAction: "none",
         }}
       />
 
+      {/* ─── On-screen D-Pad (touch devices only) ─────────────────────────── */}
+      {isTouchDevice && (
+        <div
+          data-ocid="game.panel"
+          style={{
+            marginTop: 20,
+            display: "grid",
+            gridTemplateColumns: "56px 56px 56px",
+            gridTemplateRows: "56px 56px 56px",
+            gap: 8,
+          }}
+        >
+          {/* Row 1: empty, up, empty */}
+          <div />
+          <DPadButton
+            label="▲"
+            ocid="game.button"
+            onPress={() => handleDirection("UP")}
+          />
+          <div />
+          {/* Row 2: left, empty center, right */}
+          <DPadButton
+            label="◀"
+            ocid="game.secondary_button"
+            onPress={() => handleDirection("LEFT")}
+          />
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              background: "rgba(57,230,255,0.06)",
+              border: "2px solid rgba(57,230,255,0.2)",
+              borderRadius: 8,
+            }}
+          />
+          <DPadButton
+            label="▶"
+            ocid="game.toggle"
+            onPress={() => handleDirection("RIGHT")}
+          />
+          {/* Row 3: empty, down, empty */}
+          <div />
+          <DPadButton
+            label="▼"
+            ocid="game.primary_button"
+            onPress={() => handleDirection("DOWN")}
+          />
+          <div />
+        </div>
+      )}
+
       <div
         style={{
-          marginTop: "14px",
+          marginTop: 14,
           color: "rgba(57,230,255,0.4)",
           fontSize: "6px",
           fontFamily: "'Press Start 2P', monospace",
